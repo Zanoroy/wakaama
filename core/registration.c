@@ -60,9 +60,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 #include <limits.h>
 
-#define MAX_LOCATION_LENGTH 10      // strlen("/rd/65534") + 1
+#define MAX_LOCATION_LENGTH 20      // strlen("/rd/65534") + 1
 
 #ifdef LWM2M_CLIENT_MODE
 
@@ -1719,6 +1720,27 @@ static lwm2m_client_t * prv_getClientByName(lwm2m_context_t * contextP,
     return targetP;
 }
 
+// Look up client by registration token (for UPDATE and DELETE operations)
+static lwm2m_client_t * prv_getClientByToken(lwm2m_context_t * contextP,
+                                              const char * token)
+{
+    lwm2m_client_t * targetP;
+
+    if (token == NULL || token[0] == '\0') return NULL;
+    
+    targetP = contextP->clientList;
+    while (targetP != NULL)
+    {
+        if (strcmp(token, targetP->registrationToken) == 0)
+        {
+            return targetP;
+        }
+        targetP = targetP->next;
+    }
+
+    return NULL;
+}
+
 void registration_freeClient(lwm2m_context_t *const context, lwm2m_client_t *clientP) {
     LOG_DBG("Entering");
     if (clientP->name != NULL) lwm2m_free(clientP->name);
@@ -1746,8 +1768,28 @@ void registration_freeClient(lwm2m_context_t *const context, lwm2m_client_t *cli
     lwm2m_free(clientP);
 }
 
+// Generate a random alphanumeric token (10 characters)
+static void prv_generateRandomToken(char *token, size_t length)
+{
+    const char charset[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    static int seeded = 0;
+    size_t i;
+    
+    if (!seeded) {
+        srand((unsigned int)time(NULL));
+        seeded = 1;
+    }
+    
+    for (i = 0; i < length - 1; i++) {
+        int index = rand() % (sizeof(charset) - 1);
+        token[i] = charset[index];
+    }
+    token[length - 1] = '\0';
+}
+
 static int prv_getLocationString(uint16_t id,
-                                 char location[MAX_LOCATION_LENGTH])
+                                 char location[MAX_LOCATION_LENGTH],
+                                 const char *token)
 {
     int index;
     int result;
@@ -1758,8 +1800,9 @@ static int prv_getLocationString(uint16_t id,
     if (result < 0) return 0;
     index = result;
 
-    result = utils_intToText(id, (uint8_t*)location + index, MAX_LOCATION_LENGTH - index);
-    if (result == 0) return 0;
+    // Use the provided token (stored in client struct)
+    result = utils_stringCopy(location + index, MAX_LOCATION_LENGTH - index, token);
+    if (result < 0) return 0;
 
     return index + result;
 }
@@ -1857,8 +1900,13 @@ uint8_t  registration_handleRequest(lwm2m_context_t * contextP,
                 else
                 {
                     lwm2m_client_t * tmpClientP = utils_findClient(contextP, fromSessionH);
-                    contextP->clientList = (lwm2m_client_t *)LWM2M_LIST_RM(contextP->clientList, tmpClientP->internalID, &tmpClientP);
-                    registration_freeClient(contextP, tmpClientP);
+                    // Only remove and free if tmpClientP is different from clientP
+                    // Otherwise we'd be double-freeing the same client
+                    if (tmpClientP != NULL && tmpClientP != clientP)
+                    {
+                        contextP->clientList = (lwm2m_client_t *)LWM2M_LIST_RM(contextP->clientList, tmpClientP->internalID, &tmpClientP);
+                        registration_freeClient(contextP, tmpClientP);
+                    }
                 }
             }
             if (clientP != NULL)
@@ -1896,7 +1944,9 @@ uint8_t  registration_handleRequest(lwm2m_context_t * contextP,
             clientP->objectList = objects;
             clientP->sessionH = fromSessionH;
 
-            if (prv_getLocationString(clientP->internalID, location) == 0)
+            // Generate and store random registration token for this client
+            prv_generateRandomToken(clientP->registrationToken, sizeof(clientP->registrationToken));
+            if (prv_getLocationString(clientP->internalID, location, clientP->registrationToken) == 0)
             {
                 registration_freeClient(contextP, clientP);
                 return COAP_500_INTERNAL_SERVER_ERROR;
@@ -1918,7 +1968,14 @@ uint8_t  registration_handleRequest(lwm2m_context_t * contextP,
             // Registration update
             if (LWM2M_URI_IS_SET_INSTANCE(uriP)) return COAP_400_BAD_REQUEST;
 
-            clientP = (lwm2m_client_t *)lwm2m_list_find((lwm2m_list_t *)contextP->clientList, uriP->objectId);
+            // Look up client by registration token (supports alphanumeric tokens)
+            LOG_ARG_DBG("Looking up client by token: '%s'", uriP->registrationToken);
+            clientP = prv_getClientByToken(contextP, uriP->registrationToken);
+            LOG_ARG_DBG("prv_getClientByToken returned: %p", (void*)clientP);
+            // Fall back to numeric ID lookup for backward compatibility
+            if (clientP == NULL && LWM2M_URI_IS_SET_OBJECT(uriP)) {
+                clientP = (lwm2m_client_t *)lwm2m_list_find((lwm2m_list_t *)contextP->clientList, uriP->objectId);
+            }
             if (clientP == NULL) return COAP_404_NOT_FOUND;
 
             // Endpoint client name MUST NOT be present
@@ -2014,10 +2071,16 @@ uint8_t  registration_handleRequest(lwm2m_context_t * contextP,
     {
         lwm2m_client_t * clientP;
 
-        if (!LWM2M_URI_IS_SET_OBJECT(uriP)) return COAP_400_BAD_REQUEST;
         if (LWM2M_URI_IS_SET_INSTANCE(uriP)) return COAP_400_BAD_REQUEST;
 
-        clientP = (lwm2m_client_t *)LWM2M_LIST_FIND(contextP->clientList, uriP->objectId);
+        // Look up client by registration token (supports alphanumeric tokens)
+        LOG_ARG_DBG("Looking up client by token: '%s'", uriP->registrationToken);
+            clientP = prv_getClientByToken(contextP, uriP->registrationToken);
+            LOG_ARG_DBG("prv_getClientByToken returned: %p", (void*)clientP);
+        // Fall back to numeric ID lookup for backward compatibility  
+        if (clientP == NULL && LWM2M_URI_IS_SET_OBJECT(uriP)) {
+            clientP = (lwm2m_client_t *)LWM2M_LIST_FIND(contextP->clientList, uriP->objectId);
+        }
 
         if (clientP == NULL) {
             return COAP_400_BAD_REQUEST;

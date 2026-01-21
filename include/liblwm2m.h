@@ -346,6 +346,7 @@ typedef struct
 #ifndef LWM2M_VERSION_1_0
     uint16_t    resourceInstanceId;
 #endif
+    char        registrationToken[12];  /* Token for registration UPDATE/DELETE */
 } lwm2m_uri_t;
 
 typedef enum
@@ -633,6 +634,7 @@ typedef struct _lwm2m_server_
     char *                  location;
     bool                    dirty;
     lwm2m_block_data_t *    blockData;   // list to handle temporary block data.
+    char                    registrationToken[11]; // Random 10-char token + null
 #ifndef LWM2M_VERSION_1_0
     uint16_t                servObjInstID;// Server object instance ID if not a bootstrap server.
     uint8_t                 attempt;      // Current registration attempt
@@ -735,6 +737,7 @@ typedef struct _lwm2m_client_
     lwm2m_observation_t *   observationList;
     uint16_t                observationId;
     lwm2m_block_data_t *    blockData;   // list to handle temporary block data.
+    char                    registrationToken[11]; // Random 10-char token + null
 } lwm2m_client_t;
 
 /*

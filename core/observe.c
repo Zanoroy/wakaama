@@ -1289,7 +1289,7 @@ int prv_lwm2m_observe(lwm2m_context_t * contextP,
     token[2] = observationData->id >> 8;
     token[3] = observationData->id & 0xFF;
 
-    transactionP = transaction_new(clientP->sessionH, COAP_GET, clientP->altPath, uriP, contextP->nextMID++, 4, token);
+    transactionP = transaction_new(clientP->sessionH, COAP_GET, clientP->altPath, uriP, contextP->nextMID++, 8, token);
     if (transactionP == NULL)
     {
         lwm2m_free(observationData);
@@ -1362,7 +1362,7 @@ int prv_lwm2m_observe_cancel(lwm2m_context_t * contextP,
         token[2] = observationP->id >> 8;
         token[3] = observationP->id & 0xFF;
 
-        transactionP = transaction_new(clientP->sessionH, COAP_GET, clientP->altPath, uriP, contextP->nextMID++, 4, token);
+        transactionP = transaction_new(clientP->sessionH, COAP_GET, clientP->altPath, uriP, contextP->nextMID++, 8, token);
         if (transactionP == NULL)
         {
             return COAP_500_INTERNAL_SERVER_ERROR;

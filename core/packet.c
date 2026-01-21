@@ -254,7 +254,7 @@ static lwm2m_transaction_t * prv_create_next_block_transaction(lwm2m_transaction
     lwm2m_transaction_t * clone = transaction_new(transaction->peerH, (coap_method_t) message->code, NULL, NULL, nextMID, message->token_len, message->token);
     if (clone == NULL) return NULL;
 
-    coap_set_header_content_type(clone->message, message->type);
+    ((coap_packet_t *)clone->message)->type = message->type;  // Copy message type (CON/NON), NOT content type
 
     if (message->proxy_uri != NULL)
     {
@@ -308,9 +308,10 @@ static lwm2m_transaction_t * prv_create_next_block_transaction(lwm2m_transaction
         SET_OPTION((coap_packet_t *)clone->message, COAP_OPTION_URI_PATH);
     }
 
-    if (IS_OPTION(message, COAP_OPTION_OBSERVE))
+    // RFC 7959: OBSERVE should not be in block continuation requests
+    // if (IS_OPTION(message, COAP_OPTION_OBSERVE))
     {
-        coap_set_header_observe(clone->message, message->observe);
+        //     coap_set_header_observe(clone->message, message->observe);
     }
 
     for (int i = 0; i < message->accept_num; i++) {
@@ -621,6 +622,20 @@ void lwm2m_handle_packet(lwm2m_context_t *contextP, uint8_t *buffer, size_t leng
             if (coap_error_code == NO_ERROR)
 #endif
             {
+                // Debug: Log uri_path chain before calling handle_request
+                {
+                    multi_option_t * p = message->uri_path;
+                    int seg = 0;
+                    while (p) {
+                        LOG_ARG_DBG("[packet.c] uri_path[%d]: len=%d data=%.*s next=%p", 
+                                   seg, (int)p->len, (int)p->len, p->data, (void*)p->next);
+                        p = p->next;
+                        seg++;
+                    }
+                    if (seg == 0) {
+                        LOG_DBG("[packet.c] uri_path is NULL");
+                    }
+                }
                 coap_error_code = handle_request(contextP, fromSessionH, message, response);
             }
             if (coap_error_code == NO_ERROR)

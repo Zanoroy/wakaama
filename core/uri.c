@@ -100,7 +100,8 @@ lwm2m_request_type_t uri_decode(char * altPath,
     int readNum;
     lwm2m_request_type_t requestType = LWM2M_REQUEST_TYPE_DM;
 
-    LOG_ARG_DBG("altPath: \"%s\"", STR_NULL2EMPTY(altPath));
+    LOG_ARG_DBG("altPath: \"%s\", uriPath=%p", STR_NULL2EMPTY(altPath), (void*)uriPath);
+    if (uriPath) LOG_ARG_DBG("First segment: len=%zu, data=%.20s", uriPath->len, uriPath->data);
 
     LWM2M_URI_RESET(uriP);
 
@@ -111,6 +112,7 @@ lwm2m_request_type_t uri_decode(char * altPath,
     {
         requestType = LWM2M_REQUEST_TYPE_REGISTRATION;
         uriPath = uriPath->next;
+        LOG_ARG_DBG("After rd: uriPath=%p", (void*)uriPath);
         if (uriPath == NULL) return requestType;
     }
     else if (NULL != uriPath
@@ -160,7 +162,19 @@ lwm2m_request_type_t uri_decode(char * altPath,
     }
 
     readNum = uri_getNumber(uriPath->data, uriPath->len);
-    if (readNum < 0 || readNum >= LWM2M_MAX_ID) goto error;
+    LOG_ARG_DBG("uri_getNumber returned: %d for segment len=%zu, requestType=%d", readNum, uriPath->len, requestType);
+    if (readNum < 0 || readNum >= LWM2M_MAX_ID) {
+        // For registration requests, this might be a token string (not a number)
+        if (requestType == LWM2M_REQUEST_TYPE_REGISTRATION && uriPath->len > 0 && uriPath->len < sizeof(uriP->registrationToken)) {
+            memcpy(uriP->registrationToken, uriPath->data, uriPath->len);
+            uriP->registrationToken[uriPath->len] = '\0';
+            LOG_ARG_DBG("Stored registration token: %s", uriP->registrationToken);
+            uriPath = uriPath->next;
+            if (uriPath != NULL) goto error;
+            return requestType;
+        }
+        goto error;
+    }
     uriP->objectId = (uint16_t)readNum;
     uriPath = uriPath->next;
 
@@ -170,18 +184,21 @@ lwm2m_request_type_t uri_decode(char * altPath,
         return requestType;
     }
 
-    if (uriPath == NULL) return requestType;
+    LOG_ARG_DBG("After rd: uriPath=%p", (void*)uriPath);
+        if (uriPath == NULL) return requestType;
 
     // Read object instance
     if (uriPath->len != 0)
     {
         readNum = uri_getNumber(uriPath->data, uriPath->len);
+    LOG_ARG_DBG("uri_getNumber returned: %d for segment len=%zu, requestType=%d", readNum, uriPath->len, requestType);
         if (readNum < 0 || readNum >= LWM2M_MAX_ID) goto error;
         uriP->instanceId = (uint16_t)readNum;
     }
     uriPath = uriPath->next;
 
-    if (uriPath == NULL) return requestType;
+    LOG_ARG_DBG("After rd: uriPath=%p", (void*)uriPath);
+        if (uriPath == NULL) return requestType;
 
     // Read resource ID
     if (uriPath->len != 0)
@@ -190,13 +207,15 @@ lwm2m_request_type_t uri_decode(char * altPath,
         if (!LWM2M_URI_IS_SET_INSTANCE(uriP)) goto error;
 
         readNum = uri_getNumber(uriPath->data, uriPath->len);
+    LOG_ARG_DBG("uri_getNumber returned: %d for segment len=%zu, requestType=%d", readNum, uriPath->len, requestType);
         if (readNum < 0 || readNum >= LWM2M_MAX_ID) goto error;
         uriP->resourceId = (uint16_t)readNum;
     }
 
 #ifndef LWM2M_VERSION_1_0
     uriPath = uriPath->next;
-    if (uriPath == NULL) return requestType;
+    LOG_ARG_DBG("After rd: uriPath=%p", (void*)uriPath);
+        if (uriPath == NULL) return requestType;
     // Read resource instance ID
     if (uriPath->len != 0)
     {
@@ -204,6 +223,7 @@ lwm2m_request_type_t uri_decode(char * altPath,
         if (!LWM2M_URI_IS_SET_RESOURCE(uriP)) goto error;
 
         readNum = uri_getNumber(uriPath->data, uriPath->len);
+    LOG_ARG_DBG("uri_getNumber returned: %d for segment len=%zu, requestType=%d", readNum, uriPath->len, requestType);
         if (readNum < 0 || readNum >= LWM2M_MAX_ID) goto error;
         uriP->resourceInstanceId = (uint16_t)readNum;
     }
